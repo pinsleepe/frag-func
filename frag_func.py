@@ -11,6 +11,9 @@ mpl.use('agg')
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
 import datetime
+from matplotlib.colors import LinearSegmentedColormap
+from math import ceil
+import seaborn as sns
 
 
 dotenv_path = join(dirname(__file__), '.env')
@@ -45,9 +48,9 @@ def check_type(text):
     return text
 
 
-def sheet_cols(sheet):
+def sheet_cols(st):
     p = r'Traffic$'  # match traffic at end of str
-    cols = [s for s in list(sheet.keys()) if re.search(p, s)]
+    cols = [s for s in list(st.keys()) if re.search(p, s)]
     return cols
 
 
@@ -56,10 +59,142 @@ class FragSpreadsheet(object):
         self.worksheets = client.open(workbook_name)
         keys = [w.title for w in self.worksheets]
         self.overview = keys[0]
-        self.countries = keys[1:]
+        self.countries_list = keys[1:]
+        self.countries = None
 
-    def open_sheet(self, country):
-        return self.worksheets.worksheet(country)
+        # self._open_country()
+        self._open_overview()
+        self._read_overview()
+
+    def _open_country(self):
+        countries = [self.worksheets.worksheet(w) for w in self.countries_list]
+        self.countries = countries
+
+    def _open_overview(self):
+        self.overview = self.worksheets.worksheet(self.overview)
+
+    def _read_overview(self):
+        records = self.overview.get_all_records()
+
+        def format_cells(key, scale):
+            return [ceil(check_type(d[key]) / scale) for d in records]
+
+        def check_type(text):
+            if type(text) == float:
+                pass
+            else:
+                try:
+                    text = float(text.replace(',', ''))
+                except ValueError:
+                    text = 0
+            return text
+
+        countries = [d['Country'] for d in records]
+        internet_users = format_cells('Internet Users                        (31 Dec 2017)', 1.0e6)
+        population = format_cells('Population              (2018 Est.) ', 1.0e6)
+        fb = format_cells('Facebook Subscribers (31-Dec-2017)', 1.0e6)
+        growth = format_cells('Internet Growth %               (2000 - 2017)', 1.0e3)
+        data = {'internet_users': pd.Series(internet_users, index=countries),
+                'population': pd.Series(population, index=countries),
+                'facebook_subscribers': pd.Series(fb, index=countries),
+                'growth': pd.Series(growth, index=countries)}
+
+        self.overview = pd.DataFrame(data)
+
+    def plot(self, growth=False, social=False):
+        date = datetime.datetime.now().strftime("%Y-%m-%d")
+        if growth:
+            df = self.overview.sort_values('growth')
+            val = 'growth'
+            side_bar_ttl = 'Internet Growth(in 1000s of %)'
+            save_fig_ttl = '%s_%s.png' % ('Internet_Growth', date)
+        if social:
+            df = self.overview.sort_values('facebook_subscribers')
+            val = 'facebook_subscribers'
+            side_bar_ttl = 'FB users (in millions)'
+            save_fig_ttl = '%s_%s.png' % ('FB_users', date)
+        fig = plt.figure(figsize=(26, 22))
+        ax = fig.add_subplot(111)
+        ttl = 'Internet Usage'
+        a = 0.7
+
+        num_shades = len(df)
+        customcmap = sns.cubehelix_palette(num_shades)
+
+        df['population'].plot(kind='barh',
+                              ax=ax,
+                              alpha=a,
+                              legend=False,
+                              color=customcmap,
+                              edgecolor='w',
+                              xlim=(0, np.max(df['population'])),
+                              title=ttl)
+        ax.grid(False)
+        ax.set_frame_on(False)
+        ax.set_title(ax.get_title(), fontsize=26, alpha=a, ha='left')
+        plt.subplots_adjust(top=0.9)
+        ax.title.set_position((0, 1.08))
+        ax.xaxis.set_label_position('top')
+        xlab = 'Population (in millions)'
+        ax.set_xlabel(xlab, fontsize=20, alpha=a, ha='left')
+        ax.xaxis.set_label_coords(0, 1.04)
+        ax.xaxis.tick_top()
+        ax.yaxis.set_ticks_position('none')
+        ax.xaxis.set_ticks_position('none')
+
+        max_v = ceil(np.max(df['population']))
+        mean_v = ceil(max_v / 2.0)
+        min_v = ceil(mean_v - mean_v / 2.0)
+        min2_v = ceil(min_v - min_v / 2.0)
+
+        xticks = [min2_v, min_v, mean_v, max_v]
+        ax.xaxis.set_ticks(xticks)
+        ax.set_xticklabels(xticks, fontsize=16, alpha=a)
+        yticks = [item.get_text() for item in ax.get_yticklabels()]
+        ax.set_yticklabels(yticks, fontsize=16, alpha=a)
+        ax.yaxis.set_tick_params(pad=12)
+        hmin, hmax = 0.1, 0.9
+        xmin, xmax = np.min(df['internet_users']), np.max(df['internet_users'])
+        f = lambda x: hmin + (hmax - hmin) * (x - xmin) / (xmax - xmin)
+        hs = [f(x) for x in df['internet_users']]
+        for container in ax.containers:
+            for i, child in enumerate(container.get_children()):
+                child.set_y(child.get_y() - 0.125 + 0.5 - hs[i] / 2)
+                plt.setp(child, height=hs[i])
+        l1 = Line2D([], [], linewidth=3, color='k', alpha=a)
+        l2 = Line2D([], [], linewidth=18, color='k', alpha=a)
+        l3 = Line2D([], [], linewidth=32, color='k', alpha=a)
+        rnd = 1
+        labels = [str(int(round(l / rnd) * rnd))
+                  for l in (np.min(df['internet_users']),
+                            np.mean(df['internet_users']),
+                            np.max(df['internet_users']))]
+        leg = ax.legend([l1, l2, l3], labels, ncol=3, frameon=False, fontsize=16,
+                        bbox_to_anchor=[1.1, 0.12], handlelength=2,
+                        handletextpad=1, columnspacing=2,
+                        title='Internet Users (in millions)')
+        plt.setp(leg.get_title(), fontsize=20, alpha=a)
+        leg.get_title().set_position((0, 10))
+        [plt.setp(label, alpha=a) for label in leg.get_texts()]
+        ctb = LinearSegmentedColormap.from_list('custombar', customcmap, N=2048)
+
+        sm = plt.cm.ScalarMappable(cmap=ctb,
+                                   norm=mpl.colors.Normalize(vmin=df[val].min(),
+                                                             vmax=df[val].max()))
+        sm._A = []
+        cbar = plt.colorbar(sm, alpha=0.05, aspect=10, shrink=0.4)
+        cbar.solids.set_edgecolor("face")
+        cbar.outline.set_visible(False)
+        cbar.ax.tick_params(labelsize=16)
+        smin = np.min(df[val])
+        smax = np.max(df[val])
+        mytks = range(smin, smax, int(smax / 10))
+        cbar.set_ticks(mytks)
+        cbar.ax.set_yticklabels([str(az) for az in mytks], alpha=a)
+        cbar.set_label(side_bar_ttl, alpha=a, rotation=270, fontsize=20, labelpad=20)
+        cbarytks = plt.getp(cbar.ax.axes, 'yticklines')
+        plt.setp(cbarytks, visible=False)
+        plt.savefig(save_fig_ttl, bbox_inches='tight', dpi=300)
 
 
 class FragSheet(object):
@@ -87,13 +222,9 @@ class FragSheet(object):
         self.df = pd.DataFrame(data)
 
     def plot_country_frag(self):
-        # Create a figure of given size
         fig = plt.figure(figsize=(16, 12))
-        # Add a subplot
         ax = fig.add_subplot(111)
-        # Set title
         ttl = '%s - Monthly Visits (in thousands)' % self.country.capitalize()
-        # Set color transparency (0: transparent; 1: solid)
         a = 0.7
         ax = self.df.total_visits.plot(
             kind='barh',
@@ -196,12 +327,17 @@ if __name__ == "__main__":
 
     frag_model = FragSpreadsheet("MARKET FRAGMENTATION RESEARCH_copy")
 
-    for c in frag_model.countries:
-        print(c.capitalize())
-        sheet = FragSheet(frag_model.open_sheet(c))
-        try:
-            sheet.read()
-            sheet.plot_country_frag()
-        except (ValueError, IndexError):
-            print('---> No data!')
-            pass
+    # for c in frag_model.countries:
+    #     sheet = FragSheet(c)
+    #     print(sheet.country)
+    #     try:
+    #         sheet.read()
+    #         sheet.plot_country_frag()
+    #     except (ValueError, IndexError):
+    #         print('---> No data!')
+    #         pass
+
+    ov_df = frag_model.overview
+    print(ov_df.head())
+    frag_model.plot(growth=True)
+    frag_model.plot(social=True)
