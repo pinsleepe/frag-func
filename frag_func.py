@@ -62,7 +62,7 @@ class FragSpreadsheet(object):
         self.countries_list = keys[1:]
         self.countries = None
 
-        # self._open_country()
+        self._open_country()
         self._open_overview()
         self._read_overview()
 
@@ -196,6 +196,30 @@ class FragSpreadsheet(object):
         plt.setp(cbarytks, visible=False)
         plt.savefig(save_fig_ttl, bbox_inches='tight', dpi=300)
 
+    def plot_segmentation(self, aggregated_df):
+        # get rid off SA because it skews the results
+        aggregated_df = aggregated_df[aggregated_df.country != 'South africa']
+        aggregated_df = aggregated_df.sort_values('country')
+        fig, ax = plt.subplots(figsize=(26, 22))
+        aggregated_df.set_index(['country', aggregated_df.index]).unstack()['total_visits'].plot(kind='barh',
+                                                                                                 stacked=True,
+                                                                                                 ax=ax,
+                                                                                                 colormap="Dark2",
+                                                                                                 title='Market Segmentation - Total monthly visits',
+                                                                                                 legend=False)
+        a = 0.7
+        ax.grid(False)
+        # Remove plot frame
+        ax.set_frame_on(False)
+        ax.set_title(ax.get_title(), fontsize=26, alpha=a)
+        plt.xticks(size=20)
+        plt.yticks(size=20)
+        ax.yaxis.label.set_visible(False)
+        ax.xaxis.set_label('Total monthly visits')
+        date = datetime.datetime.now().strftime("%Y-%m-%d")
+        save_fig_ttl = '%s_%s.png' % ('Fragmentation', date)
+        plt.savefig(save_fig_ttl, bbox_inches='tight', dpi=300)
+
 
 class FragSheet(object):
     def __init__(self, sheet):
@@ -327,17 +351,21 @@ if __name__ == "__main__":
 
     frag_model = FragSpreadsheet("MARKET FRAGMENTATION RESEARCH_copy")
 
-    # for c in frag_model.countries:
-    #     sheet = FragSheet(c)
-    #     print(sheet.country)
-    #     try:
-    #         sheet.read()
-    #         sheet.plot_country_frag()
-    #     except (ValueError, IndexError):
-    #         print('---> No data!')
-    #         pass
+    aggregated = []
+    for c in frag_model.countries:
+        sheet = FragSheet(c)
+        print(sheet.country)
+        try:
+            sheet.read()
+            aggregated.append(sheet.df)
+            # sheet.plot_country_frag()
+        except (ValueError, IndexError):
+            print('---> No data!')
+            pass
+
+    frag_model.plot_segmentation(pd.concat(aggregated))
 
     ov_df = frag_model.overview
     print(ov_df.head())
-    frag_model.plot(growth=True)
-    frag_model.plot(social=True)
+    # frag_model.plot(growth=True)
+    # frag_model.plot(social=True)
