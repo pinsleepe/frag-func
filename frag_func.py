@@ -33,8 +33,6 @@ client = gspread.authorize(creds)
 # spreadsheet = client.open("MARKET FRAGMENTATION RESEARCH_copy")
 
 # Extract and print all of the values
-# list_of_hashes = sheet.get_all_records()
-# print(list_of_hashes)
 
 
 def check_type(text):
@@ -54,6 +52,10 @@ def sheet_cols(st):
     return cols
 
 
+def num2perc(part, whole):
+  return 100 * float(part)/float(whole)
+
+
 class FragSpreadsheet(object):
     def __init__(self, workbook_name):
         self.worksheets = client.open(workbook_name)
@@ -61,6 +63,7 @@ class FragSpreadsheet(object):
         self.overview = keys[0]
         self.countries_list = keys[1:]
         self.countries = None
+        self.aggregate = None
 
         self._open_country()
         self._open_overview()
@@ -89,7 +92,7 @@ class FragSpreadsheet(object):
                     text = 0
             return text
 
-        countries = [d['Country'] for d in records]
+        countries = [d['Country'].title() for d in records]
         internet_users = format_cells('Internet Users                        (31 Dec 2017)', 1.0e6)
         population = format_cells('Population              (2018 Est.) ', 1.0e6)
         fb = format_cells('Facebook Subscribers (31-Dec-2017)', 1.0e6)
@@ -100,6 +103,59 @@ class FragSpreadsheet(object):
                 'growth': pd.Series(growth, index=countries)}
 
         self.overview = pd.DataFrame(data)
+
+    def aggregate_data(self):
+        aggregated = []
+        for c in self.countries:
+            sheet = FragSheet(c)
+            print(sheet.country)
+            sheet.read()
+            if sheet.df.empty:
+                print('---> No data!')
+            else:
+                aggregated.append(sheet.df)
+        df = pd.concat(aggregated)
+        df_no_missing = df.dropna()
+        df_no_missing = df_no_missing.rename(columns={'total_visits': 'tv'})
+        df_no_missing['total_visits'] = df_no_missing['tv'].round()
+        df_no_missing = df_no_missing.drop('tv', 1)
+        self.aggregate = df_no_missing
+
+    def collect_stats(self):
+        std = []
+        con = []
+        for i in list(self.aggregate['country'].unique()):
+            idx = self.aggregate['country'] == i
+            ndf = self.aggregate[idx]
+            if ndf.shape[0] > 1:
+                # normalise to percentage
+                total = ndf['total_visits'].sum()
+
+                perc = [num2perc(k, total) for k in list(ndf['total_visits'])]
+                ndfa = ndf.copy()
+                ndfa['perc'] = perc
+
+                ndf = ndfa.sort_values(by=['perc'], ascending=False)
+                ndf_skew = ndf['perc'].skew()
+                ndf_kurtosis = ndf['perc'].kurtosis()
+                ndf_var = ndf['perc'].var()
+                ndf_std = ndf['perc'].std()
+                std.append(ndf_std)
+                con.append(i)
+        return con, std
+
+    def bubble_df(self, country, stdev):
+        new_iu = []
+        g = []
+        for c in country:
+            p = self.overview.loc[c]['internet_users']
+            w = self.overview.loc[c]['population']
+            new_iu.append(num2perc(p, w))
+            g.append(self.overview.loc[c]['growth'])
+        data = {'internet_users': pd.Series(new_iu, index=country),
+                'std': pd.Series(stdev, index=country),
+                'growth': pd.Series(g, index=country)}
+        return pd.DataFrame(data)
 
     def plot(self, growth=False, social=False):
         date = datetime.datetime.now().strftime("%Y-%m-%d")
@@ -196,9 +252,9 @@ class FragSpreadsheet(object):
         plt.setp(cbarytks, visible=False)
         plt.savefig(save_fig_ttl, bbox_inches='tight', dpi=300)
 
-    def plot_segmentation(self, aggregated_df):
+    def plot_bar(self, aggregated_df):
         # get rid off SA because it skews the results
-        aggregated_df = aggregated_df[aggregated_df.country != 'South africa']
+        aggregated_df = aggregated_df[aggregated_df.country != 'South Africa']
         aggregated_df = aggregated_df.sort_values('country')
         fig, ax = plt.subplots(figsize=(26, 22))
         aggregated_df.set_index(['country', aggregated_df.index]).unstack()['total_visits'].plot(kind='barh',
@@ -220,6 +276,36 @@ class FragSpreadsheet(object):
         save_fig_ttl = '%s_%s.png' % ('Fragmentation', date)
         plt.savefig(save_fig_ttl, bbox_inches='tight', dpi=300)
 
+    def plot_bubble(self, df):
+        fig = plt.figure(figsize=(20, 25))
+        blobs = 30000 / df['std']
+        # blobs = df['std']*200
+        plt.scatter(df['internet_users'], df['growth'],
+                    s=blobs,
+                    c=df['internet_users'],
+                    cmap='Blues',
+                    alpha=0.4,
+                    edgecolors="grey",
+                    linewidth=2)
+        # label each bubble
+        for n, c, r in zip(list(df.index), df['growth'], df['internet_users']):
+            plt.annotate(n, xy=(r, c),
+                         xytext=(0, np.sqrt(c) / 2. + 10),
+                         textcoords="offset points",
+                         ha="center",
+                         va="bottom",
+                         size=20)
+
+        # Add titles (main and on axis)
+        plt.xlabel("Internet users as % of the population", size=25)
+        plt.ylabel("Internet growth in 1000s (last 17 years)", size=25)
+        plt.xticks(size=25)
+        plt.yticks(size=25)
+        plt.title('Market Fragmentation')
+        date = datetime.datetime.now().strftime("%Y-%m-%d")
+        save_fig_ttl = '%s_%s.png' % ('Variance_blob', date)
+        fig.savefig(save_fig_ttl, bbox_inches='tight', dpi=300)
+
 
 class FragSheet(object):
     def __init__(self, sheet):
@@ -228,22 +314,27 @@ class FragSheet(object):
         self.df = None
 
     def read(self):
-        # sheet in a spreadsheet
-        # record is one column in a sheet
-        sites = [r['Name of Site'] for r in self.records]
-        country_rank = [check_type(r['Rank in Country']) for r in self.records]
-        # all columns have the same names
-        cols = sheet_cols(self.records[0])
-        mean_visits = []
-        scale = 1000.0
-        for r in self.records:
-            vals = [check_type(r[c])/scale for c in cols]
-            mean_visits.append(np.mean(vals))
-        country = [self.country.capitalize()]*len(sites)
-        data = {'total_visits': pd.Series(mean_visits, index=sites),
-                'country_rank': pd.Series(country_rank, index=sites),
-                'country': pd.Series(country, index=sites)}
-        self.df = pd.DataFrame(data)
+        if len(self.records) > 0:
+            # sheet in a spreadsheet
+            # record is one column in a sheet
+            sites = [r['Name of Site'] for r in self.records]
+            country_rank = [check_type(r['Rank in Country']) for r in self.records]
+            # all columns have the same names
+            cols = sheet_cols(self.records[0])
+            mean_visits = []
+            scale = 1000.0
+            for r in self.records:
+                vals = [check_type(r[c])/scale for c in cols]
+                mean_visits.append(np.mean(vals))
+
+            country = [self.country.title()]*len(sites)
+            data = {'total_visits': pd.Series(mean_visits, index=sites),
+                    'country_rank': pd.Series(country_rank, index=sites),
+                    'country': pd.Series(country, index=sites)}
+            self.df = pd.DataFrame(data)
+        else:
+            # just a placeholder
+            self.df = pd.DataFrame(columns=['A', 'B', 'C', 'D', 'E', 'F', 'G'])
 
     def plot_country_frag(self):
         fig = plt.figure(figsize=(16, 12))
@@ -350,22 +441,14 @@ class FragSheet(object):
 if __name__ == "__main__":
 
     frag_model = FragSpreadsheet("MARKET FRAGMENTATION RESEARCH_copy")
+    frag_model.aggregate_data()
+    con, std = frag_model.collect_stats()
+    df = frag_model.bubble_df(con, std)
+    frag_model.plot_bubble(df)
 
-    aggregated = []
-    for c in frag_model.countries:
-        sheet = FragSheet(c)
-        print(sheet.country)
-        try:
-            sheet.read()
-            aggregated.append(sheet.df)
-            # sheet.plot_country_frag()
-        except (ValueError, IndexError):
-            print('---> No data!')
-            pass
-
-    frag_model.plot_segmentation(pd.concat(aggregated))
+    frag_model.plot_bar(frag_model.aggregate)
 
     ov_df = frag_model.overview
     print(ov_df.head())
-    # frag_model.plot(growth=True)
-    # frag_model.plot(social=True)
+    frag_model.plot(growth=True)
+    frag_model.plot(social=True)
