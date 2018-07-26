@@ -7,6 +7,7 @@ import re
 import numpy as np
 import pandas as pd
 import matplotlib as mpl
+
 mpl.use('agg')
 import matplotlib.pyplot as plt
 from matplotlib.lines import Line2D
@@ -14,7 +15,6 @@ import datetime
 from matplotlib.colors import LinearSegmentedColormap
 from math import ceil
 import seaborn as sns
-
 
 dotenv_path = join(dirname(__file__), '.env')
 load_dotenv(dotenv_path)
@@ -27,12 +27,6 @@ scope = ['https://spreadsheets.google.com/feeds',
 creds = ServiceAccountCredentials.from_json_keyfile_name(SECRET_TOKEN,
                                                          scope)
 client = gspread.authorize(creds)
-
-# Find a workbook by name and open the first sheet
-# Make sure you use the right name here.
-# spreadsheet = client.open("MARKET FRAGMENTATION RESEARCH_copy")
-
-# Extract and print all of the values
 
 
 def check_type(text):
@@ -53,11 +47,12 @@ def sheet_cols(st):
 
 
 def num2perc(part, whole):
-  return 100 * float(part)/float(whole)
+    return 100 * float(part) / float(whole)
 
 
 class FragSpreadsheet(object):
     def __init__(self, workbook_name):
+        self.name = workbook_name
         self.worksheets = client.open(workbook_name)
         keys = [w.title for w in self.worksheets]
         self.overview = keys[0]
@@ -93,10 +88,10 @@ class FragSpreadsheet(object):
             return text
 
         countries = [d['Country'].title() for d in records]
-        internet_users = format_cells('Internet Users                        (31 Dec 2017)', 1.0e6)
-        population = format_cells('Population              (2018 Est.) ', 1.0e6)
+        internet_users = format_cells('Internet Users (31 Dec 2017)', 1.0e6)
+        population = format_cells('Population (2018 Est.) ', 1.0e6)
         fb = format_cells('Facebook Subscribers (31-Dec-2017)', 1.0e6)
-        growth = format_cells('Internet Growth %               (2000 - 2017)', 1.0e3)
+        growth = format_cells('Internet Growth % (2000 - 2017)', 1.0e3)
         data = {'internet_users': pd.Series(internet_users, index=countries),
                 'population': pd.Series(population, index=countries),
                 'facebook_subscribers': pd.Series(fb, index=countries),
@@ -159,16 +154,17 @@ class FragSpreadsheet(object):
 
     def plot(self, growth=False, social=False):
         date = datetime.datetime.now().strftime("%Y-%m-%d")
+        name = self.name.split(':')[1].strip().title().replace(' ', '_')
         if growth:
             df = self.overview.sort_values('growth')
             val = 'growth'
-            side_bar_ttl = 'Internet Growth(in 1000s of %)'
-            save_fig_ttl = '%s_%s.png' % ('Internet_Growth', date)
+            side_bar_ttl = '%s - Internet Growth(in 1000s of %)' % name
+            save_fig_ttl = '%s_%s_%s.png' % (name, 'Internet_Growth', date)
         if social:
             df = self.overview.sort_values('facebook_subscribers')
             val = 'facebook_subscribers'
-            side_bar_ttl = 'FB users (in millions)'
-            save_fig_ttl = '%s_%s.png' % ('FB_users', date)
+            side_bar_ttl = '%s - Facebook users (in millions)' % name
+            save_fig_ttl = '%s_%s_%s.png' % (name, 'FB_users', date)
         fig = plt.figure(figsize=(26, 22))
         ax = fig.add_subplot(111)
         ttl = 'Internet Usage'
@@ -257,11 +253,13 @@ class FragSpreadsheet(object):
         aggregated_df = aggregated_df[aggregated_df.country != 'South Africa']
         aggregated_df = aggregated_df.sort_values('country')
         fig, ax = plt.subplots(figsize=(26, 22))
+        name = self.name.split(':')[1].strip().title().replace(' ', '_')
+        ttl = '%s - Market Segmentation Total monthly visits' % name
         aggregated_df.set_index(['country', aggregated_df.index]).unstack()['total_visits'].plot(kind='barh',
                                                                                                  stacked=True,
                                                                                                  ax=ax,
                                                                                                  colormap="Dark2",
-                                                                                                 title='Market Segmentation - Total monthly visits',
+                                                                                                 title=ttl,
                                                                                                  legend=False)
         a = 0.7
         ax.grid(False)
@@ -273,10 +271,11 @@ class FragSpreadsheet(object):
         ax.yaxis.label.set_visible(False)
         ax.xaxis.set_label('Total monthly visits')
         date = datetime.datetime.now().strftime("%Y-%m-%d")
-        save_fig_ttl = '%s_%s.png' % ('Fragmentation', date)
+        save_fig_ttl = '%s_%s_%s.png' % (name, 'Fragmentation', date)
         plt.savefig(save_fig_ttl, bbox_inches='tight', dpi=300)
 
     def plot_bubble(self, df):
+        name = self.name.split(':')[1].strip().title().replace(' ', '_')
         fig = plt.figure(figsize=(20, 25))
         blobs = 30000 / df['std']
         # blobs = df['std']*200
@@ -301,9 +300,10 @@ class FragSpreadsheet(object):
         plt.ylabel("Internet growth in 1000s (last 17 years)", size=25)
         plt.xticks(size=25)
         plt.yticks(size=25)
-        plt.title('Market Fragmentation')
+        ttl = '%s - Market Segmentation' % name
+        plt.title(ttl, size=25)
         date = datetime.datetime.now().strftime("%Y-%m-%d")
-        save_fig_ttl = '%s_%s.png' % ('Variance_blob', date)
+        save_fig_ttl = '%s_%s_%s.png' % (name, 'Variance_blob', date)
         fig.savefig(save_fig_ttl, bbox_inches='tight', dpi=300)
 
 
@@ -324,10 +324,10 @@ class FragSheet(object):
             mean_visits = []
             scale = 1000.0
             for r in self.records:
-                vals = [check_type(r[c])/scale for c in cols]
+                vals = [check_type(r[c]) / scale for c in cols]
                 mean_visits.append(np.mean(vals))
 
-            country = [self.country.title()]*len(sites)
+            country = [self.country.title()] * len(sites)
             data = {'total_visits': pd.Series(mean_visits, index=sites),
                     'country_rank': pd.Series(country_rank, index=sites),
                     'country': pd.Series(country, index=sites)}
@@ -373,7 +373,7 @@ class FragSheet(object):
         # Customize x tick lables
         mean_v = np.mean(self.df['total_visits'])
         max_v = np.max(self.df['total_visits'])
-        min_v = mean_v - mean_v/2.0
+        min_v = mean_v - mean_v / 2.0
         xticks = [min_v, mean_v, max_v]
 
         ax.xaxis.set_ticks(xticks)
@@ -440,15 +440,18 @@ class FragSheet(object):
 
 if __name__ == "__main__":
 
-    frag_model = FragSpreadsheet("MARKET FRAGMENTATION RESEARCH_copy")
-    frag_model.aggregate_data()
-    con, std = frag_model.collect_stats()
-    df = frag_model.bubble_df(con, std)
-    frag_model.plot_bubble(df)
+    gsheets = ['MARKET FRAGMENTATION RESEARCH: PROPERTY WEBSITES',
+               "MARKET FRAGMENTATION RESEARCH: JOB WEBSITES"]
+    for g in gsheets:
+        frag_model = FragSpreadsheet(g)
+        frag_model.aggregate_data()
+        con, std = frag_model.collect_stats()
+        df = frag_model.bubble_df(con, std)
+        frag_model.plot_bubble(df)
 
-    frag_model.plot_bar(frag_model.aggregate)
+        frag_model.plot_bar(frag_model.aggregate)
 
-    ov_df = frag_model.overview
-    print(ov_df.head())
-    frag_model.plot(growth=True)
-    frag_model.plot(social=True)
+        ov_df = frag_model.overview
+        print(ov_df.head())
+        frag_model.plot(growth=True)
+        frag_model.plot(social=True)
