@@ -158,7 +158,7 @@ class FragSpreadsheet(object):
         if growth:
             df = self.overview.sort_values('growth')
             val = 'growth'
-            side_bar_ttl = '%s - Internet Growth(in 1000s of %)' % name
+            side_bar_ttl = '%s - Internet Growth(in 1000s of percent)' % name
             save_fig_ttl = '%s_%s_%s.png' % (name, 'Internet_Growth', date)
         if social:
             df = self.overview.sort_values('facebook_subscribers')
@@ -452,6 +452,5 @@ if __name__ == "__main__":
         frag_model.plot_bar(frag_model.aggregate)
 
         ov_df = frag_model.overview
-        print(ov_df.head())
         frag_model.plot(growth=True)
         frag_model.plot(social=True)
