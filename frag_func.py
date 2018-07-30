@@ -154,20 +154,19 @@ class FragSpreadsheet(object):
 
     def plot(self, growth=False, social=False):
         date = datetime.datetime.now().strftime("%Y-%m-%d")
-        name = self.name.split(':')[1].strip().title().replace(' ', '_')
         if growth:
             df = self.overview.sort_values('growth')
             val = 'growth'
-            side_bar_ttl = '%s - Internet Growth(in 1000s of percent)' % name
-            save_fig_ttl = '%s_%s_%s.png' % (name, 'Internet_Growth', date)
+            side_bar_ttl = 'Internet Growth (in 1000s of percent)'
+            save_fig_ttl = '%s_%s.png' % ('Internet_Growth', date)
         if social:
             df = self.overview.sort_values('facebook_subscribers')
             val = 'facebook_subscribers'
-            side_bar_ttl = '%s - Facebook users (in millions)' % name
-            save_fig_ttl = '%s_%s_%s.png' % (name, 'FB_users', date)
+            side_bar_ttl = 'Facebook users (in millions)'
+            save_fig_ttl = '%s_%s.png' % ('FB_users', date)
         fig = plt.figure(figsize=(26, 22))
         ax = fig.add_subplot(111)
-        ttl = 'Internet Usage'
+        ttl = 'Internet Usage vs %s' % side_bar_ttl
         a = 0.7
 
         num_shades = len(df)
